@@ -362,6 +362,7 @@ def review_on_lambda(report: dict, before: dict, after: dict, log_before: list[d
 
 def file_issue(repo: str, title: str, body: str, out_dir: pathlib.Path) -> str:
     payload = {"title": title, "body": body, "labels": ["incident", "auto-triage"]}
+    out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "issue.json").write_text(json.dumps(payload, indent=2) + "\n")
     secret = os.environ.get("NANGO_SECRET_KEY", "")
     conn = os.environ.get("NANGO_CONNECTION_ID", "")
