@@ -1,6 +1,6 @@
 """Record the closed loop as a video: robot view on the left, analyst on the right.
 
-Runs the same four stages as incident_loop.py, but renders every rollout step
+Runs every scenario through the same stages as incident_loop.py, but renders every rollout step
 from the MuJoCo tracking camera and composes it with a live text panel, so the
 recording IS the demo rather than a screen capture of it.
 
@@ -142,43 +142,39 @@ def hold(writer, frame, seconds):
         writer.append_data(frame)
 
 
-def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--model", default="models/ppo_fixed_line_slope/g1_fixed_line_final.zip")
-    p.add_argument("--assist", type=float, default=0.5)
-    p.add_argument("--impulse", type=float, default=700.0)
-    p.add_argument("--seed", type=int, default=4100)
-    p.add_argument("--llm", default=il.DEFAULT_MODEL)
-    p.add_argument("--repo", default=il.os.environ.get("GITHUB_REPO", "abhijitbetigeri/robot-incident-analyst"))
-    p.add_argument("--no-issue", action="store_true")
-    p.add_argument("--out", default="submission/demo.mp4")
-    a = p.parse_args()
+def fmt_val(v) -> str:
+    return "on" if v is True else "off" if v is False else str(v)
 
-    out = pathlib.Path(a.out); out.parent.mkdir(parents=True, exist_ok=True)
-    art = pathlib.Path("runs") / f"recording_{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    art.mkdir(parents=True, exist_ok=True)
 
-    policy = PPO.load(a.model, device="cpu")
-    config = {"balance_assist_scale": a.assist, "slip_mode": "impulse",
-              "slip_impulse_n": a.impulse, "policy": a.model, "seed": a.seed}
-    env = slip_recovery_env.load(disturb=True, slip_mode="impulse", render_mode="rgb_array",
-                                 slip_impulse_range=(a.impulse, a.impulse),
-                                 balance_assist_scale=a.assist)
-    writer = imageio.get_writer(str(out), fps=FPS, codec="libx264", quality=8, macro_block_size=16)
-    t0 = time.time()
+def scenario_card(writer, frame, idx, total, sc, seconds=3.0):
+    lines = [(TITLE, INK, F_TITLE), ("", INK, F_BODY),
+             (f"SCENARIO {idx} of {total}", AMBER, F_SMALL),
+             (sc["title"], INK, F_HEAD), ("", INK, F_BODY),
+             ("Misconfiguration injected:", MUTED, F_SMALL)]
+    lines += [(f"  {k} = {fmt_val(v)}", INK, F_BODY) for k, v in sc["overrides"].items()]
+    lines += [("", INK, F_BODY), ("The analyst is not told which setting", MUTED, F_SMALL),
+              ("is wrong. It has to find it in the telemetry.", MUTED, F_SMALL)]
+    hold(writer, compose(frame, panel(lines)), seconds)
 
-    # 0. architecture card
-    intro_frames(writer, 6.0)
+
+def run_scenario(writer, policy, a, name, idx, total, art):
+    sc = il.SCENARIOS[name]
+    env = il.make_env(name, a.impulse, render_mode="rgb_array")
+    config = il.config_of(env, a.impulse, a.seed, a.model)
+    cfg_txt = "  ".join(f"{k}={fmt_val(v)}" for k, v in sc["overrides"].items())
+
+    env.reset(seed=a.seed)
+    first = env.render()
+    scenario_card(writer, first, idx, total, sc)
 
     # 1. fail
-    print("[1/4] rendering the failing run", flush=True)
-    before, log, fall_frame = rollout_render(env, policy, a.seed, writer,
-                                             "[1/5] Running episode", a.assist, every=1)
+    print(f"[{name}] 1/5 rendering the failing run", flush=True)
+    before, log, fall_frame = rollout_render(env, policy, a.seed, writer, "[1/5] Running episode", cfg_txt, every=2)
     print(f"      {il.outcome(before)}", flush=True)
 
     # 2. diagnose
-    print(f"[2/4] diagnosing via Respan / {a.llm}", flush=True)
-    thinking = compose(fall_frame, panel(live_lines("[2/5] Diagnosing", a.assist, a.seed, None,
+    print(f"[{name}] 2/5 diagnosing via Respan / {a.llm}", flush=True)
+    thinking = compose(fall_frame, panel(live_lines("[2/5] Diagnosing", cfg_txt, a.seed, None,
                                                     (f"sending {len(log)} telemetry rows to", MUTED))
                                          + [(f"{a.llm}", TEAL, F_BODY), ("via Respan gateway ...", MUTED, F_BODY)]))
     hold(writer, thinking, 2.0)
@@ -195,73 +191,113 @@ def main() -> None:
         ws = wrap(e, 42)
         lines += [("- " + ws[0], INK, F_SMALL)] + [("  " + w, INK, F_SMALL) for w in ws[1:]]
     lines += [("", INK, F_BODY), ("FIX", AMBER, F_SMALL),
-              (f"{fix['tunable']} = {fix['value']}", GREEN, F_HEAD)]
+              (f"{fix['tunable']} = {fmt_val(fix['value'])}", GREEN, F_HEAD)]
     hold(writer, compose(fall_frame, panel(lines)), 8.0)
     print(f"      fix: {fix['tunable']} = {fix['value']}", flush=True)
 
     # 3. fix and re-run
-    value = float(fix["value"])
-    if fix.get("tunable") == "balance_assist_scale":
-        env.set_balance_assist_scale(max(0.0, min(1.0, value)))
-    elif fix.get("tunable") == "slip_impulse_n":
-        env._slip_impulse = value
-    print("[3/4] rendering the re-run", flush=True)
-    after, _log2, ok_frame = rollout_render(env, policy, a.seed, writer,
-                                            f"[3/5] Re-running with fix", value, every=2, hold=40)
+    value = il.apply_fix(env, fix)
+    print(f"[{name}] 3/5 rendering the re-run", flush=True)
+    after, log_after, ok_frame = rollout_render(env, policy, a.seed, writer, "[3/5] Re-running with fix",
+                                                f"{fix['tunable']}={fmt_val(value)}", every=3, hold=40)
     print(f"      {il.outcome(after)}", flush=True)
 
-    # 4. independent review on the Lambda instance
-    print("[4/5] independent review on Lambda", flush=True)
-    waiting = compose(ok_frame, panel(live_lines("[4/5] Independent review", value, a.seed, None,
-                                                 ("sending before + after telemetry to", MUTED))
-                                      + [("reviewer model on Lambda GPU ...", TEAL, F_BODY)]))
-    hold(writer, waiting, 1.5)
-    review, review_meta = il.review_on_lambda(report, before, after, log, _log2)
-    lines = [(TITLE, INK, F_TITLE), ("", INK, F_BODY),
-             ("[4/5] Independent review on Lambda", TEAL, F_HEAD)]
-    if review and review_meta and "error" not in review_meta:
-        verdict = str(review.get("verdict", "?")).upper()
-        vcol = GREEN if verdict == "CONFIRMED" else AMBER
-        lines += [(f"{review_meta['model']}  on Lambda GPU instance", MUTED, F_SMALL),
-                  (f"{review_meta['latency_s']} s", MUTED, F_SMALL), ("", INK, F_BODY),
-                  ("VERDICT", AMBER, F_SMALL),
-                  (f"{verdict}   confidence {review.get('confidence', '?')}", vcol, F_HEAD), ("", INK, F_BODY),
-                  ("REASONING", AMBER, F_SMALL)]
-        lines += [(l, INK, F_SMALL) for l in wrap(str(review.get("reasoning", "")), 46)]
-        lines += [("", INK, F_BODY), ("RESIDUAL RISK", AMBER, F_SMALL)]
-        lines += [(l, INK, F_SMALL) for l in wrap(str(review.get("residual_risk", "")), 46)]
-        print(f"      {verdict} ({review_meta['model']}, {review_meta['latency_s']} s)", flush=True)
-    else:
-        lines += [("review unavailable", MUTED, F_BODY)]
-        lines += [(l, MUTED, F_SMALL) for l in wrap(str((review_meta or {}).get("error", "LAMBDA not configured")), 46)]
-        print(f"      skipped: {(review_meta or {}).get('error', 'not configured')}", flush=True)
-    hold(writer, compose(ok_frame, panel(lines)), 7.0)
+    # 4. independent review on Lambda (card only when it actually ran)
+    review, review_meta = None, None
+    reviewer = il.lambda_key() and il.lambda_pick_model()
+    if reviewer:
+        print(f"[{name}] 4/5 independent review on Lambda ({reviewer})", flush=True)
+        waiting = compose(ok_frame, panel(live_lines("[4/5] Independent review", cfg_txt, a.seed, None,
+                                                     ("sending before + after telemetry to", MUTED))
+                                          + [("reviewer model on Lambda GPU ...", TEAL, F_BODY)]))
+        hold(writer, waiting, 1.5)
+        review, review_meta = il.review_on_lambda(report, before, after, log, log_after)
+        if review and review_meta and "error" not in review_meta:
+            verdict = str(review.get("verdict", "?")).upper()
+            vcol = GREEN if verdict == "CONFIRMED" else AMBER
+            lines = [(TITLE, INK, F_TITLE), ("", INK, F_BODY),
+                     ("[4/5] Independent review on Lambda", TEAL, F_HEAD),
+                     (f"{review_meta['model']}  on Lambda GPU instance", MUTED, F_SMALL),
+                     (f"{review_meta['latency_s']} s", MUTED, F_SMALL), ("", INK, F_BODY),
+                     ("VERDICT", AMBER, F_SMALL),
+                     (f"{verdict}   confidence {review.get('confidence', '?')}", vcol, F_HEAD), ("", INK, F_BODY),
+                     ("REASONING", AMBER, F_SMALL)]
+            lines += [(l, INK, F_SMALL) for l in wrap(str(review.get("reasoning", "")), 46)]
+            lines += [("", INK, F_BODY), ("RESIDUAL RISK", AMBER, F_SMALL)]
+            lines += [(l, INK, F_SMALL) for l in wrap(str(review.get("residual_risk", "")), 46)]
+            hold(writer, compose(ok_frame, panel(lines)), 7.0)
+            print(f"      {verdict} ({review_meta['model']}, {review_meta['latency_s']} s)", flush=True)
+        else:
+            print(f"      skipped: {(review_meta or {}).get('error', 'not configured')}", flush=True)
 
     # 5. file
     where = "not filed (--no-issue)"
     if not a.no_issue:
-        print("[5/5] filing issue via Nango", flush=True)
+        print(f"[{name}] 5/5 filing issue via Nango", flush=True)
         where = il.file_issue(a.repo, report.get("issue_title", "Robot incident"),
-                              il.issue_body(report, before, after, meta, config, review, review_meta), art)
+                              il.issue_body(report, before, after, meta, config, review, review_meta), art / name)
         print(f"      {where}", flush=True)
+    step = "[5/5]" if reviewer else "[4/4]"
     lines = [(TITLE, INK, F_TITLE), ("", INK, F_BODY),
-             ("[5/5] Issue filed via Nango", TEAL, F_HEAD)]
+             (f"{step} Issue filed via Nango", TEAL, F_HEAD)]
     lines += [(l, MUTED, F_SMALL) for l in wrap(where, 48)]
     lines += [("", INK, F_BODY),
-              (f"{'':16}{'before':>10}{'after':>10}", MUTED, F_SMALL),
-              (f"{'assist scale':16}{before['balance_assist_scale']:>10}{after['balance_assist_scale']:>10}", INK, F_BODY),
-              (f"{'ascent (m)':16}{before['ascent_m']:>10.3f}{after['ascent_m']:>10.3f}", INK, F_BODY),
-              (f"{'steps':16}{before['steps']:>10}{after['steps']:>10}", INK, F_BODY),
-              (f"{'outcome':16}{'FALL':>10}{'SUCCESS':>10}", INK, F_BODY),
-              ("", INK, F_BODY),
-              ("Respan gateway  ->  Gemma 4 31B", MUTED, F_SMALL),
-              ("Nango           ->  GitHub issue", MUTED, F_SMALL),
-              ("Lambda          ->  independent review", MUTED, F_SMALL)]
-    hold(writer, compose(ok_frame, panel(lines)), 6.0)
-    writer.close()
+              (f"{'':18}{'before':>10}{'after':>10}", MUTED, F_SMALL),
+              (f"{fix['tunable'][:18]:18}{fmt_val(config.get(fix['tunable'])):>10}{fmt_val(value):>10}", INK, F_BODY),
+              (f"{'ascent (m)':18}{before['ascent_m']:>10.3f}{after['ascent_m']:>10.3f}", INK, F_BODY),
+              (f"{'steps':18}{before['steps']:>10}{after['steps']:>10}", INK, F_BODY),
+              (f"{'outcome':18}{'FALL':>10}{'SUCCESS' if after['success'] else 'FAIL':>10}", INK, F_BODY)]
+    hold(writer, compose(ok_frame, panel(lines)), 5.0)
     env.close()
-    (art / "summary.json").write_text(json.dumps({"before": before, "after": after, "report": report,
-                                                  "gateway": meta, "issue": where}, indent=2) + "\n")
+    return {"scenario": name, "title": sc["title"], "before": before, "after": after, "report": report,
+            "gateway": meta, "review": review, "lambda": review_meta, "issue": where, "frame": ok_frame}
+
+
+def summary_card(writer, results, seconds=8.0):
+    lines = [(TITLE, INK, F_TITLE), ("", INK, F_BODY), ("SUMMARY", AMBER, F_SMALL), ("", INK, F_BODY)]
+    for r in results:
+        fixed = "FIXED" if r["after"]["success"] else "NOT FIXED"
+        col = GREEN if r["after"]["success"] else RED
+        lines += [(r["title"], INK, F_HEAD),
+                  (f"  fell at step {r['before']['steps']}  ->  {r['report']['fix']['tunable']} = "
+                   f"{fmt_val(r['report']['fix']['value'])}", MUTED, F_SMALL),
+                  (f"  re-run: {r['after']['ascent_m']:.2f} m   {fixed}", col, F_SMALL), ("", INK, F_BODY)]
+    lines += [("Respan gateway  ->  Gemma 4 31B analyst", MUTED, F_SMALL),
+              ("Lambda GPU      ->  independent reviewer", MUTED, F_SMALL),
+              ("Nango           ->  GitHub issues", MUTED, F_SMALL)]
+    hold(writer, compose(results[-1]["frame"], panel(lines)), seconds)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--model", default="models/ppo_fixed_line_slope/g1_fixed_line_final.zip")
+    p.add_argument("--scenarios", default="assist,traction,line",
+                   help="comma-separated subset of " + ",".join(il.SCENARIOS))
+    p.add_argument("--impulse", type=float, default=700.0)
+    p.add_argument("--seed", type=int, default=4100)
+    p.add_argument("--llm", default=il.DEFAULT_MODEL)
+    p.add_argument("--repo", default=il.os.environ.get("GITHUB_REPO", "abhijitbetigeri/robot-incident-analyst"))
+    p.add_argument("--no-issue", action="store_true")
+    p.add_argument("--out", default="submission/demo.mp4")
+    a = p.parse_args()
+
+    names = [s.strip() for s in a.scenarios.split(",") if s.strip()]
+    out = pathlib.Path(a.out); out.parent.mkdir(parents=True, exist_ok=True)
+    art = pathlib.Path("runs") / f"recording_{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    art.mkdir(parents=True, exist_ok=True)
+
+    policy = PPO.load(a.model, device="cpu")
+    writer = imageio.get_writer(str(out), fps=FPS, codec="libx264", quality=8, macro_block_size=16)
+    t0 = time.time()
+    intro_frames(writer, 6.0)
+    results = []
+    for i, name in enumerate(names, 1):
+        r = run_scenario(writer, policy, a, name, i, len(names), art)
+        results.append(r)
+    summary_card(writer, results)
+    writer.close()
+    (art / "summary.json").write_text(json.dumps(
+        [{k: v for k, v in r.items() if k != "frame"} for r in results], indent=2) + "\n")
     print(f"\nwrote {out}  ({time.time() - t0:.0f} s)  artifacts in {art}", flush=True)
 
 

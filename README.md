@@ -44,6 +44,22 @@ all in this repo.
 Each run leaves `runs/incident_<timestamp>/` with `run_before.jsonl`,
 `run_after.jsonl`, `report.json`, `issue.json`, and `summary.json`.
 
+## Scenarios
+
+The analyst is never told which setting is wrong. Each scenario injects one
+misconfiguration and the model has to find it in the telemetry. All three are
+verified: the re-run with the proposed fix completes the ascent.
+
+| `--scenario` | Injected fault | What happens | Fix Gemma found |
+|---|---|---|---|
+| `assist` | `balance_assist_scale = 0.5` | pelvis height decays, fall at step 126 | `balance_assist_scale = 1.0` |
+| `traction` | `boot_traction_enabled = false` | no uphill progress, slides and falls at step 495 | `boot_traction_enabled = true` |
+| `line` | `fixed_line_enabled = false` | not clipped in, slides 0.56 m back and falls at step 65 | `fixed_line_enabled = true` |
+
+An independent reviewer model served on a Lambda GPU (see
+`lambda_reviewer.sh`) checks each diagnosis against the before and after
+telemetry and adds its verdict to the issue.
+
 ## Run it
 
 ```bash
@@ -56,16 +72,20 @@ cp .env.local.example .env.local # then fill in the Nango values
 Without Nango credentials the loop still completes and prints the issue
 payload instead of filing it.
 
-Options: `--assist 0.3` picks a different bad config, `--seed` changes the
-episode, `--llm` swaps the model behind the gateway, `--live` also pushes the
+Options: `--scenario traction` or `--scenario line` picks a different fault,
+`--seed` changes the episode, `--llm` swaps the model behind the gateway,
+`--no-issue` prints the ticket instead of filing it, and `--live` pushes the
 fix into a running `mjpython demo_live.py` viewer so the audience sees the
-robot recover.
+robot recover. `record_incident.py` renders all scenarios into
+`submission/demo.mp4`.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `incident_loop.py` | The analyst: run, diagnose, fix, re-run, file |
+| `incident_loop.py` | The analyst: run, diagnose, fix, re-run, review, file |
+| `record_incident.py` | Renders the scenarios into the demo video |
+| `lambda_reviewer.sh` | Sets up and tunnels the reviewer model on a Lambda GPU instance |
 | `fixed_line_slope_env.py` | MuJoCo fixed-line ascent environment for the G1 |
 | `slip_recovery_env.py` | Adds the induced slip and the tunable balance assist |
 | `demo_live.py`, `sim_bridge.py` | Live MuJoCo viewer and the file bridge the analyst can push fixes through |

@@ -13,7 +13,7 @@ One command runs the whole loop the demo is about:
      is printed and saved instead so the demo never dies on a missing key.
 
     .venv/bin/python incident_loop.py                  # full loop
-    .venv/bin/python incident_loop.py --assist 0.3     # choose the bad config
+    .venv/bin/python incident_loop.py --scenario traction   # or: assist, line
     .venv/bin/python incident_loop.py --live           # also push fix to viewer
 
 Environment:
@@ -68,10 +68,72 @@ FALLBACK_MODELS = ["deepinfra/google/gemma-4-31B-it", "novita/google/gemma-3-27b
 
 # Metrics worth showing an analyst. Kept short so the prompt stays small.
 LOG_KEYS = (
-    "ascent", "upright_score", "pelvis_normal_height", "lateral_offset",
-    "left_boot_contact", "right_boot_contact", "ground_load_bodyweight",
+    "ascent", "uphill_speed", "upright_score", "pelvis_normal_height", "lateral_offset",
+    "left_boot_contact", "right_boot_contact", "ground_load_bodyweight", "line_load_n",
     "slip_active", "slip_depth_m",
 )
+
+# Misconfigurations the demo can start from. Each is a real failure with a
+# real fix: the analyst has to find which tunable is wrong from the telemetry.
+SCENARIOS = {
+    "assist": {
+        "title": "Balance assist dialled down",
+        "overrides": {"balance_assist_scale": 0.5},
+    },
+    "traction": {
+        "title": "Boot traction disabled",
+        "overrides": {"boot_traction_enabled": False},
+    },
+    "line": {
+        "title": "Fixed line disconnected",
+        "overrides": {"fixed_line_enabled": False},
+    },
+}
+
+TUNABLES_DOC = """- balance_assist_scale: float in [0.0, 1.0]. Scales an orientation PD on the pelvis (gain 420 at 1.0) and a lateral spring (700 N/m at 1.0). The shipped policy checkpoint was trained and validated with this at 1.0. Below about 0.5 the policy has no stabilizer to lean on.
+- boot_traction_enabled: bool. Crampon-style uphill traction of the boots on the ice face. When false the boots have only bare ice friction and the robot cannot push uphill.
+- fixed_line_enabled: bool. The rope and ascender connection to the fixed line. When false the robot is not clipped in: line_load_n stays 0 and nothing arrests a slide.
+- slip_impulse_n: shove magnitude in newtons, [0, 1200]. Lowering it makes the test easier, it does not fix the robot."""
+
+
+def make_env(scenario: str, impulse: float, **kw):
+    """Build the env with the scenario's misconfiguration applied."""
+    ov = SCENARIOS[scenario]["overrides"]
+    env = slip_recovery_env.load(disturb=True, slip_mode="impulse",
+                                 slip_impulse_range=(impulse, impulse),
+                                 balance_assist_scale=ov.get("balance_assist_scale", 1.0), **kw)
+    if not ov.get("boot_traction_enabled", True):
+        env.set_traction_enabled(False)
+    if not ov.get("fixed_line_enabled", True):
+        env.set_line_enabled(False)
+    return env
+
+
+def config_of(env, impulse: float, seed: int, policy_path: str) -> dict:
+    return {
+        "balance_assist_scale": round(float(env.balance_assist_scale), 2),
+        "boot_traction_enabled": bool(getattr(env, "_traction_enabled", True)),
+        "fixed_line_enabled": bool(getattr(env, "_line_enabled", True)),
+        "slip_mode": "impulse", "slip_impulse_n": impulse, "policy": policy_path, "seed": seed,
+    }
+
+
+def _as_bool(v) -> bool:
+    return v if isinstance(v, bool) else str(v).strip().lower() in ("1", "true", "yes", "on", "enabled")
+
+
+def apply_fix(env, fix: dict):
+    """Apply the analyst's fix to the live env. Returns the normalized value."""
+    t = fix.get("tunable")
+    if t == "balance_assist_scale":
+        v = max(0.0, min(1.0, float(fix["value"]))); env.set_balance_assist_scale(v); return v
+    if t == "boot_traction_enabled":
+        v = _as_bool(fix["value"]); env.set_traction_enabled(v); return v
+    if t == "fixed_line_enabled":
+        v = _as_bool(fix["value"]); env.set_line_enabled(v); return v
+    if t == "slip_impulse_n":
+        v = float(fix["value"]); env._slip_impulse = v; return v
+    sys.exit(f"Analyst proposed an unknown tunable: {fix}")
 
 FAILURE_RULES = {
     "ascent < -0.55 m": "slid back down the line",
@@ -156,9 +218,8 @@ def build_prompt(config: dict, before: dict, log: list[dict]) -> list[dict]:
 ## Configuration at the time
 {json.dumps(config, indent=2)}
 
-## Tunables you may set
-- balance_assist_scale: float in [0.0, 1.0]. Scales an orientation PD on the pelvis (gain 420 at 1.0) and a lateral spring (700 N/m at 1.0). The shipped policy checkpoint was trained and validated with this at 1.0. Below about 0.5 the policy has no stabilizer to lean on.
-- slip_impulse_n: shove magnitude in newtons, [0, 1200]. Lowering it makes the test easier, it does not fix the robot.
+## Tunables you may set (pick the ONE whose current value explains the failure)
+{TUNABLES_DOC}
 
 ## Failure rules the environment applies
 {json.dumps(FAILURE_RULES, indent=2)}
@@ -172,7 +233,7 @@ def build_prompt(config: dict, before: dict, log: list[dict]) -> list[dict]:
   "evidence": ["short bullet citing a metric and step", "..."],
   "failing_step": <int>,
   "severity": "low|medium|high",
-  "fix": {{"tunable": "balance_assist_scale", "value": <float>}},
+  "fix": {{"tunable": "<one of the tunables above>", "value": <float or bool>}},
   "issue_title": "short GitHub issue title",
   "expected_after_fix": "one sentence"
 }}"""
@@ -332,7 +393,7 @@ def issue_body(report: dict, before: dict, after: dict, meta: dict, config: dict
                      f"Residual risk: {review.get('residual_risk', '')}\n")
     rows = [
         "| | before | after fix |", "|---|---:|---:|",
-        f"| balance_assist_scale | {before['balance_assist_scale']} | {after['balance_assist_scale']} |",
+        f"| {fix['tunable']} | {config.get(fix['tunable'])} | {fix['value']} |",
         f"| outcome | {outcome(before)} | {outcome(after)} |",
         f"| steps | {before['steps']} | {after['steps']} |",
         f"| ascent | {before['ascent_m']} m | {after['ascent_m']} m |",
@@ -344,7 +405,7 @@ def issue_body(report: dict, before: dict, after: dict, meta: dict, config: dict
 **Evidence**
 {ev}
 
-**Fix applied:** `{fix['tunable']} = {fix['value']}` (was {config['balance_assist_scale']})
+**Fix applied:** `{fix['tunable']} = {fix['value']}` (was {config.get(fix['tunable'])})
 
 {chr(10).join(rows)}
 {review_md}
@@ -357,12 +418,16 @@ _Diagnosed by `{meta['model']}` via Respan in {meta['latency_s']} s ({meta['prom
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", default="models/ppo_fixed_line_slope/g1_fixed_line_final.zip")
-    p.add_argument("--assist", type=float, default=0.5, help="the misconfigured assist scale")
+    p.add_argument("--scenario", choices=sorted(SCENARIOS), default="assist",
+                   help="which misconfiguration to start from")
+    p.add_argument("--assist", type=float, default=None,
+                   help="override the assist scale (implies --scenario assist)")
     p.add_argument("--impulse", type=float, default=700.0)
     p.add_argument("--seed", type=int, default=4100)
     p.add_argument("--llm", default=os.environ.get("RESPAN_MODEL", DEFAULT_MODEL))
     p.add_argument("--repo", default=os.environ.get("GITHUB_REPO", "abhijitbetigeri/robot-incident-analyst"))
     p.add_argument("--live", action="store_true", help="also send the fix to a running demo_live.py viewer")
+    p.add_argument("--no-issue", action="store_true", help="print the issue payload instead of filing it")
     p.add_argument("--out", default="runs")
     a = p.parse_args()
 
@@ -371,21 +436,23 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     policy = PPO.load(a.model, device="cpu")
-    config = {"balance_assist_scale": a.assist, "slip_mode": "impulse",
-              "slip_impulse_n": a.impulse, "policy": a.model, "seed": a.seed}
-    env = slip_recovery_env.load(disturb=True, slip_mode="impulse",
-                                 slip_impulse_range=(a.impulse, a.impulse),
-                                 balance_assist_scale=a.assist)
+    if a.assist is not None:
+        a.scenario = "assist"
+        SCENARIOS["assist"]["overrides"]["balance_assist_scale"] = a.assist
+    env = make_env(a.scenario, a.impulse)
+    config = config_of(env, a.impulse, a.seed, a.model)
+    bad = SCENARIOS[a.scenario]["overrides"]
 
     # 1. run with the bad config
-    print(f"\n[1/5] Running episode  seed={a.seed}  balance_assist_scale={a.assist}", flush=True)
+    print(f"\n[1/5] Running episode  seed={a.seed}  scenario={a.scenario}  "
+          + "  ".join(f"{k}={v}" for k, v in bad.items()), flush=True)
     t0 = time.time()
     before, log = rollout_with_log(env, policy, a.seed)
     (out_dir / "run_before.jsonl").write_text("\n".join(json.dumps(r) for r in log) + "\n")
     print(f"      {outcome(before)}  ascent {before['ascent_m']} m  "
           f"upright {before['upright_score']}  ({time.time() - t0:.1f} s, {len(log)} log rows)", flush=True)
     if before["success"]:
-        print("      Episode succeeded with this config, nothing to diagnose. Lower --assist.")
+        print("      Episode succeeded with this config, nothing to diagnose. Try another --scenario.")
         return
 
     # 2. diagnose through Respan
@@ -401,14 +468,8 @@ def main() -> None:
 
     # 3. apply the fix and re-run the same seed
     fix = report["fix"]
-    value = float(fix["value"])
-    if fix.get("tunable") == "balance_assist_scale":
-        env.set_balance_assist_scale(max(0.0, min(1.0, value)))
-    elif fix.get("tunable") == "slip_impulse_n":
-        env._slip_impulse = value
-    else:
-        sys.exit(f"Gemma proposed an unknown tunable: {fix}")
-    if a.live:
+    value = apply_fix(env, fix)
+    if a.live and fix.get("tunable") == "balance_assist_scale":
         import sim_bridge
         sim_bridge.send("assist", scale=value)
         print(f"      sent assist={value} to the live viewer", flush=True)
@@ -437,7 +498,11 @@ def main() -> None:
     # 5. file it
     print(f"\n[5/5] Filing issue on {a.repo} via Nango", flush=True)
     body = issue_body(report, before, after, meta, config, review, review_meta)
-    where = file_issue(a.repo, report.get("issue_title", "G1 incident"), body, out_dir)
+    if a.no_issue:
+        (out_dir / "issue.json").write_text(json.dumps({"title": report.get("issue_title"), "body": body}, indent=2) + "\n")
+        where = f"not filed (--no-issue); payload in {out_dir / 'issue.json'}"
+    else:
+        where = file_issue(a.repo, report.get("issue_title", "G1 incident"), body, out_dir)
     print(f"      {where}", flush=True)
 
     summary = {"config": config, "before": before, "after": after, "report": report,
@@ -446,8 +511,8 @@ def main() -> None:
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
     print("\n" + "=" * 64)
-    print(f"  before   assist {before['balance_assist_scale']:<4}  {outcome(before)}")
-    print(f"  after    assist {after['balance_assist_scale']:<4}  {outcome(after)}")
+    print(f"  before   {fix['tunable']}={config.get(fix['tunable'])}  {outcome(before)}")
+    print(f"  after    {fix['tunable']}={value}  {outcome(after)}")
     print(f"  {'FIXED' if after['success'] else 'NOT FIXED'}   artifacts in {out_dir}")
     print("=" * 64 + "\n")
 
