@@ -1,0 +1,67 @@
+<mujoco model="g1_mountaineering_self_arrest_scene">
+  <compiler angle="radian" meshdir="unitree_g1/assets" texturedir="textures"/>
+
+  <visual>
+    <!-- A restrained headlight keeps the robot legible while the directional
+         sun below supplies the terrain gradients and contact shadows. -->
+    <headlight diffuse="0.18 0.20 0.23" ambient="0.06 0.07 0.09" specular="0.12 0.12 0.12"/>
+    <rgba haze="0.34 0.48 0.63 1"/>
+    <global azimuth="140" elevation="-30" offwidth="1920" offheight="1080"/>
+    <quality shadowsize="4096"/>
+    <map znear="0.02" zfar="250" fogstart="85" fogend="180"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.12 0.27 0.43"
+             rgb2="0.72 0.82 0.90" width="1024" height="1024"/>
+    <texture type="2d" name="alpine_snow" file="alpine_snow_v1.png"/>
+    <material name="snow_material" texture="alpine_snow" texuniform="true"
+              texrepeat="5 5" rgba="0.78 0.84 0.89 1"
+              reflectance="0.03" specular="0.12" shininess="0.05"/>
+    <material name="wind_crust" rgba="0.64 0.72 0.79 1"
+              reflectance="0.02" specular="0.06" shininess="0.02"/>
+    <material name="route_marker" rgba="0.82 0.20 0.06 1"
+              specular="0.10" shininess="0.06"/>
+  </asset>
+
+  <worldbody>
+    <!-- Low winter sun produces long, readable shadows across the grade.
+         A cool fill prevents the shadowed hand and axe from disappearing. -->
+    <light pos="12 -18 28" dir="-0.48 0.30 -0.82" directional="true"
+           castshadow="true" diffuse="0.76 0.72 0.66" specular="0.18 0.18 0.16"/>
+    <light pos="-8 15 18" dir="0.35 -0.45 -0.82" directional="true"
+           castshadow="false" diffuse="0.12 0.17 0.23" specular="0.02 0.02 0.03"/>
+
+    <!-- The collision slope remains the exact same 35-degree plane used for
+         training and evaluation; only its render material has changed. -->
+    <geom name="snow_mountain_slope" type="plane" size="100 100 0.1" pos="0 0 0"
+          quat="0.953717 0 -0.3007058 0" material="snow_material"
+          friction="0.06 0.005 0.0001" solref="0.01 1"
+          solimp="0.95 0.99 0.001 0.5 2"/>
+
+    <!-- Sparse visual-only terrain relief gives scale, fall-line reference,
+         and cast shadows without altering the learned policy's physics. -->
+    <body name="slope_reference_frame" quat="0.953717 0 -0.3007058 0">
+      <!-- Wind-loaded snow ribs. -->
+      <geom type="ellipsoid" pos="3.7 -2.55 0.018" size="1.10 0.34 0.035"
+            material="wind_crust" contype="0" conaffinity="0" group="2"/>
+      <geom type="ellipsoid" pos="0.7 2.85 0.014" size="1.45 0.28 0.030"
+            material="wind_crust" contype="0" conaffinity="0" group="2"/>
+      <geom type="ellipsoid" pos="-3.0 -2.75 0.016" size="1.25 0.31 0.032"
+            material="wind_crust" contype="0" conaffinity="0" group="2"/>
+      <geom type="ellipsoid" pos="-6.4 2.70 0.015" size="1.60 0.30 0.031"
+            material="wind_crust" contype="0" conaffinity="0" group="2"/>
+
+      <!-- Widely spaced rescue-route wands provide human scale without the
+           artificial metre grid/checker pattern used in the earlier video. -->
+      <geom type="cylinder" pos="4.6 2.55 0.42" size="0.018 0.42"
+            material="route_marker" contype="0" conaffinity="0" group="2"/>
+      <geom type="cylinder" pos="-0.2 2.55 0.42" size="0.018 0.42"
+            material="route_marker" contype="0" conaffinity="0" group="2"/>
+      <geom type="cylinder" pos="-5.0 2.55 0.42" size="0.018 0.42"
+            material="route_marker" contype="0" conaffinity="0" group="2"/>
+    </body>
+  </worldbody>
+
+  <include file="unitree_g1/g1_with_hands_axe.xml"/>
+</mujoco>

@@ -1,0 +1,153 @@
+<mujoco model="g1_inclined_fixed_line_scene">
+  <compiler angle="radian" meshdir="assets" texturedir="assets"/>
+  <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight diffuse="0.34 0.36 0.39" ambient="0.10 0.12 0.15" specular="0.18 0.18 0.18"/>
+    <rgba haze="0.30 0.44 0.58 1"/>
+    <global azimuth="132" elevation="-15" offwidth="1280" offheight="720"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.16 0.34 0.58" rgb2="0.82 0.88 0.93"
+      width="1024" height="1024"/>
+    <texture type="2d" name="slope_texture" file="alpine_snow.png"/>
+    <texture type="2d" name="rope_braid_texture" builtin="checker"
+      rgb1="0.98 0.52 0.025" rgb2="0.48 0.055 0.012" width="512" height="32"/>
+    <!-- An opaque blue-grey snow tint keeps the white G1 legible during
+         ground contact; pure-white albedo made contact limbs visually merge
+         into the plane even though MuJoCo penetration stayed below 28 mm. -->
+    <material name="slope_material" texture="slope_texture" texuniform="true"
+      texrepeat="11 6" rgba="0.76 0.83 0.90 1" reflectance="0"
+      specular="0.10" shininess="0.06"/>
+    <material name="rope_material" texture="rope_braid_texture" texuniform="true"
+      texrepeat="18 5" rgba="0.98 0.30 0.025 0.10" specular="0.03" shininess="0.02"/>
+    <material name="webbing_material" rgba="0.035 0.06 0.09 1"/>
+    <material name="ascender_material" rgba="0.94 0.17 0.025 1" specular="0.28" shininess="0.22"/>
+    <material name="cam_material" rgba="0.055 0.065 0.070 1" specular="0.22" shininess="0.18"/>
+    <material name="gate_material" rgba="0.72 0.78 0.82 1" specular="0.7" shininess="0.6"/>
+  </asset>
+
+  <!-- Keep the robot include before the flex declaration.  MuJoCo assigns
+       generalized coordinates in declaration order; preserving the G1 as the
+       first articulated body keeps the controller and trained policy's base
+       and actuator coordinate layout unchanged. -->
+  <include file="g1_with_hands.xml"/>
+
+  <worldbody>
+    <light pos="-4 -6 10" dir="0.45 0.35 -1" directional="true" castshadow="true"
+      diffuse="0.58 0.59 0.58" specular="0.22 0.22 0.22"/>
+    <light pos="4 3 6" dir="-0.3 -0.2 -0.8" directional="false" diffuse="0.13 0.16 0.20"/>
+
+    <!-- 28-degree snow/ice slope. The normal is rotated about world Y, so
+         uphill is +X and every metre of horizontal travel gains 0.532 m. -->
+    <geom name="ice_face" type="plane" pos="0 0 0"
+      quat="0.97029573 0 -0.24192190 0" size="14 7 0.1"
+      material="slope_material" friction="1.20 0.02 0.002"/>
+
+    <!-- A physical 14 mm fixed line: 33 massive vertices joined by
+         stiff, lightly damped edges, with both route anchors pinned to the
+         world. The flex capsules collide with the slope and robot and deform
+         under the ascender's equal-and-opposite reaction force. -->
+    <flexcomp name="fixed_rope" type="direct" dim="1" radius="0.007"
+      pos="-0.06103 -0.10000 0.11478"
+      mass="0.82" inertiabox="0.014" material="rope_material"
+      point="
+        -2.25800 -0.22000 -0.57400  -1.94244 -0.22000 -0.40648  -1.62656 -0.22000 -0.23955  -1.31040 -0.22000 -0.07317
+        -0.99397 -0.22000 0.09272  -0.67732 -0.22000 0.25820  -0.36049 -0.22000 0.42334  -0.04354 -0.22000 0.58825
+        0.27347 -0.22000 0.75305  0.59047 -0.22000 0.91785  0.90742 -0.22000 1.08276  1.22425 -0.22000 1.24790
+        1.54090 -0.22000 1.41337  1.85733 -0.22000 1.57926  2.17349 -0.22000 1.74565  2.48937 -0.22000 1.91258
+        2.80493 -0.22000 2.08010  3.12018 -0.22000 2.24821  3.43512 -0.22000 2.41690  3.74977 -0.22000 2.58614
+        4.06415 -0.22000 2.75587  4.37831 -0.22000 2.92603  4.69230 -0.22000 3.09651  5.00616 -0.22000 3.26722
+        5.31997 -0.22000 3.43805  5.63377 -0.22000 3.60888  5.94763 -0.22000 3.77959  6.26162 -0.22000 3.95007
+        6.57578 -0.22000 4.12022  6.89017 -0.22000 4.28996  7.20481 -0.22000 4.45920  7.51975 -0.22000 4.62789
+        7.83500 -0.22000 4.79600
+      "
+      element="
+        0 1  1 2  2 3  3 4  4 5  5 6  6 7  7 8
+        8 9  9 10  10 11  11 12  12 13  13 14  14 15  15 16
+        16 17  17 18  18 19  19 20  20 21  21 22  22 23  23 24
+        24 25  25 26  26 27  27 28  28 29  29 30  30 31  31 32
+      ">
+      <contact contype="4" conaffinity="1" condim="3" selfcollide="none"
+        friction="0.90 0.02 0.001" solref="0.010 1"
+        solimp="0.90 0.95 0.001"/>
+      <edge equality="true" solref="-100000 -100"
+        solimp="0.99 0.999 0.001"/>
+      <pin id="0 32"/>
+    </flexcomp>
+    <geom name="upper_anchor" type="cylinder" pos="7.77397 -0.32 4.91078"
+      size="0.085 0.026" quat="0.612907 0.353855 0.612907 0.353855"
+      material="gate_material" contype="0" conaffinity="0" group="2"/>
+
+    <!-- Cross-slope markers make true distance travelled along the incline
+         legible in the tracking shot. -->
+    <body name="route_marks" pos="0 0 -20">
+      <geom type="capsule" fromto="0.435 -0.88 0.247 0.435 0.88 0.247" size="0.013" rgba="0.93 0.97 1 0.75" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0.871 -0.88 0.479 0.871 0.88 0.479" size="0.013" rgba="0.12 0.32 0.47 0.9" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="1.306 -0.88 0.711 1.306 0.88 0.711" size="0.013" rgba="0.93 0.97 1 0.75" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="1.742 -0.88 0.943 1.742 0.88 0.943" size="0.013" rgba="0.12 0.32 0.47 0.9" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="2.177 -0.88 1.175 2.177 0.88 1.175" size="0.013" rgba="0.93 0.97 1 0.75" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="2.613 -0.88 1.407 2.613 0.88 1.407" size="0.013" rgba="0.12 0.32 0.47 0.9" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="3.048 -0.88 1.639 3.048 0.88 1.639" size="0.013" rgba="0.93 0.97 1 0.75" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="3.484 -0.88 1.871 3.484 0.88 1.871" size="0.013" rgba="0.12 0.32 0.47 0.9" contype="0" conaffinity="0" group="2"/>
+    </body>
+
+    <!-- Prepared safety equipment. The rope cam and handled ascender are
+         visual readouts of the one-way safety state in the environment. -->
+    <body name="harness_visual" mocap="true" pos="0 0 1">
+      <geom type="capsule" fromto="0 -0.18 0 0 0.18 0" size="0.022" material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0 -0.16 -0.01 0 -0.11 -0.19" size="0.012" material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0 0.16 -0.01 0 0.11 -0.19" size="0.012" material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.02 -0.17 -0.20 -0.02 -0.05 -0.20" size="0.014" material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.02 0.05 -0.20 -0.02 0.17 -0.20" size="0.014" material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="0.07 0 0.02" size="0.045 0.025 0.035" material="gate_material" contype="0" conaffinity="0" group="2"/>
+    </body>
+    <body name="chest_ascender_visual" mocap="true" pos="0.35 -0.32 0.9">
+      <geom type="capsule" fromto="0 0 -0.035 0 0 0.035" size="0.023" material="ascender_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="cylinder" pos="-0.006 0 0.006" size="0.018 0.011" quat="0.7071068 0.7071068 0 0" material="cam_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="cylinder" pos="-0.006 0 0.006" size="0.006 0.013" quat="0.7071068 0.7071068 0 0" material="gate_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.014 0 -0.035 -0.030 0 -0.062" size="0.008" material="gate_material" contype="0" conaffinity="0" group="2"/>
+    </body>
+    <body name="hand_ascender_visual" mocap="true" pos="0.65 -0.32 1.05">
+      <!-- Compact rope-cam shell and contrasting axle keep the line visible. -->
+      <geom type="capsule" fromto="0 0 0.035 0 0 0.112" size="0.026" material="ascender_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="cylinder" pos="-0.006 0 0.076" size="0.020 0.011" quat="0.7071068 0.7071068 0 0" material="cam_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="cylinder" pos="-0.006 0 0.076" size="0.0065 0.013" quat="0.7071068 0.7071068 0 0" material="gate_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="-0.024 0 0.099" size="0.006 0.014 0.018" material="gate_material" contype="0" conaffinity="0" group="2"/>
+      <!-- The hand wraps this offset rubberized handle.  Its 156 mm standoff
+           leaves room for the closed fingers between the handle and sheath;
+           two orange braces connect it to the cam body. -->
+      <geom type="capsule" fromto="-0.156 0 -0.068 -0.156 0 0.030" size="0.014" material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.156 0 0.030 -0.010 0 0.055" size="0.012" material="ascender_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.156 0 -0.068 -0.018 0 0.010" size="0.011" material="ascender_material" contype="0" conaffinity="0" group="2"/>
+    </body>
+    <body name="chest_lanyard_visual" mocap="true" pos="0 0 1">
+      <geom type="capsule" fromto="0.05 0 0 0.44 -0.32 0.16" size="0.008" material="webbing_material" contype="0" conaffinity="0" group="2"/>
+    </body>
+    <!-- Boot-hugging crampon rails and short points follow the actual
+         ankle-roll bodies.  They are visual-only so measured ground load
+         still comes from the stock boot contact geoms. -->
+    <body name="left_crampon_visual" mocap="true" pos="0 0 0">
+      <geom type="capsule" fromto="-0.065 -0.042 -0.031 0.135 -0.042 -0.031" size="0.0045" rgba="0.10 0.12 0.13 1" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.065 0.042 -0.031 0.135 0.042 -0.031" size="0.0045" rgba="0.10 0.12 0.13 1" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.045 -0.046 -0.031 -0.045 0.046 -0.031" size="0.0045" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0.105 -0.046 -0.031 0.105 0.046 -0.031" size="0.0045" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.050 -0.043 -0.033 -0.050 -0.043 -0.052" size="0.0035" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.050 0.043 -0.033 -0.050 0.043 -0.052" size="0.0035" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0.125 -0.043 -0.033 0.145 -0.043 -0.051" size="0.0035" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0.125 0.043 -0.033 0.145 0.043 -0.051" size="0.0035" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+    </body>
+    <body name="right_crampon_visual" mocap="true" pos="0 0 0">
+      <geom type="capsule" fromto="-0.065 -0.042 -0.031 0.135 -0.042 -0.031" size="0.0045" rgba="0.10 0.12 0.13 1" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.065 0.042 -0.031 0.135 0.042 -0.031" size="0.0045" rgba="0.10 0.12 0.13 1" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.045 -0.046 -0.031 -0.045 0.046 -0.031" size="0.0045" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0.105 -0.046 -0.031 0.105 0.046 -0.031" size="0.0045" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.050 -0.043 -0.033 -0.050 -0.043 -0.052" size="0.0035" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.050 0.043 -0.033 -0.050 0.043 -0.052" size="0.0035" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0.125 -0.043 -0.033 0.145 -0.043 -0.051" size="0.0035" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0.125 0.043 -0.033 0.145 0.043 -0.051" size="0.0035" material="gate_material" density="0" contype="0" conaffinity="0" group="2"/>
+    </body>
+  </worldbody>
+</mujoco>

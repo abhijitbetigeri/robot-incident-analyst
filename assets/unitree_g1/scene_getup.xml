@@ -1,0 +1,32 @@
+<mujoco model="Unitree G1 physical fall and get-up">
+  <include file="g1.xml"/>
+
+  <!-- Contact-rich recovery needs a small step and a well-converged solver. -->
+  <option timestep="0.002" integrator="implicitfast" solver="Newton"
+          cone="elliptic" iterations="80" ls_iterations="20"
+          tolerance="1e-9" gravity="0 0 -9.81"/>
+
+  <statistic center="0 0 0.8" extent="2.5"/>
+
+  <visual>
+    <headlight diffuse="0.65 0.65 0.65" ambient="0.22 0.22 0.22" specular="0.1 0.1 0.1"/>
+    <rgba haze="0.08 0.11 0.16 1"/>
+    <global azimuth="145" elevation="-18" offwidth="1920" offheight="1080"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.04 0.07 0.12" rgb2="0.18 0.24 0.31" width="512" height="3072"/>
+    <texture type="2d" name="ground_tex" builtin="checker" rgb1="0.25 0.27 0.29" rgb2="0.16 0.18 0.20" width="512" height="512" mark="edge" markrgb="0.38 0.41 0.44"/>
+    <material name="ground_mat" texture="ground_tex" texuniform="true" texrepeat="8 8" reflectance="0.08" roughness="0.9"/>
+  </asset>
+
+  <worldbody>
+    <light pos="-1.5 -2.5 4" dir="0.25 0.35 -1" diffuse="0.8 0.82 0.85" castshadow="true"/>
+    <light pos="2 1 2.5" dir="-0.4 -0.2 -1" diffuse="0.35 0.4 0.5" castshadow="false"/>
+    <!-- Rubber-on-rough-ground friction. solref/solimp remain compliant enough to
+         avoid an unrealistically rigid impact while keeping penetration shallow. -->
+    <geom name="ground" type="plane" size="0 0 0.05" material="ground_mat"
+          condim="3" friction="1.05 0.03 0.002"
+          solref="0.020 1" solimp="0.95 0.995 0.001"/>
+  </worldbody>
+</mujoco>

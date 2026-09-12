@@ -1,0 +1,117 @@
+<mujoco model="g1_fixed_line_ascending_scene">
+  <compiler angle="radian" meshdir="assets"/>
+
+  <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight diffuse="0.55 0.58 0.62" ambient="0.22 0.24 0.28" specular="0.35 0.35 0.35"/>
+    <rgba haze="0.28 0.42 0.55 1"/>
+    <global azimuth="125" elevation="-12" offwidth="1280" offheight="720"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.18 0.38 0.62" rgb2="0.78 0.86 0.92"
+      width="1024" height="1024"/>
+    <texture type="2d" name="ice_wall_texture" builtin="checker"
+      rgb1="0.53 0.64 0.70" rgb2="0.34 0.47 0.55" mark="edge" markrgb="0.74 0.85 0.90"
+      width="512" height="512"/>
+    <material name="ice_wall_material" texture="ice_wall_texture" texuniform="true"
+      texrepeat="8 24" reflectance="0.08" specular="0.25" shininess="0.18"/>
+    <material name="rope_material" rgba="0.96 0.62 0.04 1" specular="0.15" shininess="0.2"/>
+    <material name="webbing_material" rgba="0.04 0.08 0.12 1"/>
+    <material name="ascender_material" rgba="0.90 0.16 0.04 1" specular="0.5" shininess="0.45"/>
+    <material name="gate_material" rgba="0.72 0.78 0.82 1" specular="0.7" shininess="0.6"/>
+  </asset>
+
+  <worldbody>
+    <light pos="-4 -6 9" dir="0.4 0.35 -1" directional="true" castshadow="true"
+      diffuse="0.95 0.95 0.90" specular="0.35 0.35 0.35"/>
+    <light pos="2 4 5" dir="-0.2 -0.4 -0.7" directional="false" diffuse="0.28 0.34 0.40"/>
+
+    <!-- Vertical alpine face.  It is kept behind the climber so the mechanics
+         of this first hanging-rope curriculum are not contaminated by wall friction. -->
+    <geom name="ice_face" type="plane" pos="0.62 0 0" quat="0.7071068 0 -0.7071068 0"
+      size="12 12 0.1" material="ice_wall_material" friction="0.35 0.01 0.001"/>
+    <geom name="lower_ledge" type="box" pos="0 0 -0.55" size="1.2 1.0 0.08"
+      rgba="0.70 0.80 0.84 1" friction="0.8 0.01 0.001"/>
+
+    <!-- The fixed rope is a collision-free visual.  Load is transmitted by
+         the explicit one-way ascender law in fixed_line_env.py. -->
+    <geom name="fixed_rope" type="capsule" fromto="0.36 0 -0.35 0.36 0 7.2"
+      size="0.012" material="rope_material" contype="0" conaffinity="0" group="2"/>
+    <geom type="cylinder" pos="0.36 0 7.15" size="0.09 0.025"
+      quat="0.7071068 0.7071068 0 0" material="gate_material" contype="0" conaffinity="0" group="2"/>
+    <geom type="sphere" pos="0.36 0 7.15" size="0.035" rgba="0.12 0.16 0.18 1"
+      contype="0" conaffinity="0" group="2"/>
+
+    <!-- Half-metre route marks make net ascent legible in a tracking shot. -->
+    <body name="route_marks" pos="0.605 0 0">
+      <geom type="box" pos="0 0 0.5" size="0.008 0.38 0.012" rgba="0.92 0.96 1 0.75" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="0 0 1.0" size="0.008 0.38 0.012" rgba="0.10 0.28 0.42 0.9" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="0 0 1.5" size="0.008 0.38 0.012" rgba="0.92 0.96 1 0.75" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="0 0 2.0" size="0.008 0.38 0.012" rgba="0.10 0.28 0.42 0.9" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="0 0 2.5" size="0.008 0.38 0.012" rgba="0.92 0.96 1 0.75" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="0 0 3.0" size="0.008 0.38 0.012" rgba="0.10 0.28 0.42 0.9" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="0 0 3.5" size="0.008 0.38 0.012" rgba="0.92 0.96 1 0.75" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="0 0 4.0" size="0.008 0.38 0.012" rgba="0.10 0.28 0.42 0.9" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="0 0 4.5" size="0.008 0.38 0.012" rgba="0.92 0.96 1 0.75" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="0 0 5.0" size="0.008 0.38 0.012" rgba="0.10 0.28 0.42 0.9" contype="0" conaffinity="0" group="2"/>
+    </body>
+
+    <!-- These mocap bodies are visual readouts of the simulated equipment
+         state.  Their positions are synchronized after every policy step. -->
+    <body name="harness_visual" mocap="true" pos="0 0 1">
+      <geom type="capsule" fromto="0 -0.18 0 0 0.18 0" size="0.022"
+        material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0 -0.16 -0.01 0 -0.11 -0.19" size="0.012"
+        material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0 0.16 -0.01 0 0.11 -0.19" size="0.012"
+        material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.02 -0.17 -0.20 -0.02 -0.05 -0.20" size="0.014"
+        material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.02 0.05 -0.20 -0.02 0.17 -0.20" size="0.014"
+        material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="box" pos="0.07 0 0.02" size="0.045 0.025 0.035"
+        material="gate_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0.10 0 -0.02 0.15 0 0.08" size="0.010"
+        material="ascender_material" contype="0" conaffinity="0" group="2"/>
+    </body>
+    <body name="chest_ascender_visual" mocap="true" pos="0.36 0 1">
+      <geom type="box" size="0.030 0.023 0.060" material="ascender_material"
+        contype="0" conaffinity="0" group="2"/>
+      <geom type="cylinder" pos="-0.002 0 0.030" size="0.022 0.010" quat="0.7071068 0.7071068 0 0"
+        material="gate_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.055 0 -0.045 -0.025 0 0.025" size="0.010"
+        material="webbing_material" contype="0" conaffinity="0" group="2"/>
+    </body>
+    <body name="chest_lanyard_visual" mocap="true" pos="0 0 1">
+      <geom type="capsule" fromto="0.12 0 0 0.36 0 0.30" size="0.007"
+        material="webbing_material" contype="0" conaffinity="0" group="2"/>
+    </body>
+    <body name="hand_ascender_visual" mocap="true" pos="0.36 0 1.5">
+      <!-- Compact cam body on the rope, offset rubber handle in the hand,
+           and a visible bridge replace the former featureless red block. -->
+      <geom type="box" pos="0 0 0.075" size="0.030 0.024 0.060" material="ascender_material"
+        contype="0" conaffinity="0" group="2"/>
+      <geom type="cylinder" pos="0 0 0.085" size="0.022 0.010" quat="0.7071068 0.7071068 0 0"
+        material="gate_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.028 0 -0.065 -0.028 0 0.060" size="0.016"
+        material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.028 0 0.055 0 0 0.105" size="0.018"
+        material="ascender_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0 0.03 0.12 0 0.03 0.21" size="0.009"
+        material="gate_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="0 0 -1.10 0 0 0" size="0.006"
+        material="webbing_material" contype="0" conaffinity="0" group="2"/>
+      <geom type="capsule" fromto="-0.26 0 -1.10 0 0 -1.10" size="0.006"
+        material="webbing_material" contype="0" conaffinity="0" group="2"/>
+    </body>
+    <body name="foot_stirrup_visual" mocap="true" pos="0.12 0 0.4">
+      <geom type="capsule" fromto="0 -0.17 0 0 0.17 0" size="0.012"
+        material="webbing_material" contype="0" conaffinity="0" group="2"/>
+    </body>
+  </worldbody>
+
+  <include file="g1_with_hands.xml"/>
+</mujoco>
