@@ -1,4 +1,4 @@
-# Robot Incident Analyst
+# Robotic Simulation Incident Analysis
 
 A failed robot run gets a root cause, a fix, a re-run that proves the fix, and a
 ticket. One command, about 13 seconds, no human reads the log.

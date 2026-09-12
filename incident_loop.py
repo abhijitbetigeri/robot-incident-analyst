@@ -23,6 +23,8 @@ Environment:
     NANGO_CONNECTION_ID     Nango connection id for the GitHub integration
     NANGO_PROVIDER_KEY      Nango provider config key, default "github"
     GITHUB_REPO             owner/name for the issue, default abhijitbetigeri/robot-incident-analyst
+    LAMBDA_HOST / LAMBDA_ENABLED   reviewer model served on a Lambda GPU instance, see lambda_reviewer.sh
+    LAMBDA_URL              OpenAI-compatible URL of that model, default http://127.0.0.1:11434/v1 (ssh tunnel)
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ import os
 import pathlib
 import re
 import sys
+import textwrap
 import time
 
 import requests
@@ -214,6 +217,86 @@ def parse_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
+# ---------------------------------------------------------------- lambda ---
+
+# OpenAI-compatible endpoint of the reviewer model served on a Lambda GPU
+# instance (Ollama or vLLM), reached through an SSH tunnel by default.
+LAMBDA_URL = os.environ.get("LAMBDA_URL", "http://127.0.0.1:11434/v1").rstrip("/")
+# Preference order for the reviewer model. First one the server lists wins;
+# substrings, matched case-insensitively.
+LAMBDA_PREFERRED = ("gemma", "llama-3.3-70b", "llama3.3-70b", "llama3.1-70b", "qwen", "deepseek", "hermes")
+
+
+def lambda_key() -> str:
+    # Ollama ignores the bearer token; vLLM may require one. Any non-empty
+    # value enables the review stage.
+    return os.environ.get("LAMBDA_API_KEY", "") or os.environ.get("LAMBDA_ENABLED", "")
+
+
+def lambda_pick_model() -> str | None:
+    forced = os.environ.get("LAMBDA_MODEL")
+    if forced:
+        return forced
+    try:
+        r = requests.get(f"{LAMBDA_URL}/models", headers={"Authorization": f"Bearer {lambda_key()}"}, timeout=20)
+        ids = [m["id"] for m in r.json().get("data", [])]
+    except (requests.RequestException, ValueError, KeyError):
+        return None
+    for pref in LAMBDA_PREFERRED:
+        for i in ids:
+            if pref in i.lower():
+                return i
+    return ids[0] if ids else None
+
+
+def review_on_lambda(report: dict, before: dict, after: dict, log_before: list[dict],
+                     log_after: list[dict]) -> tuple[dict | None, dict | None]:
+    """Independent second opinion from an open model served by Lambda Inference.
+
+    The reviewer never sees the analyst's fix as ground truth: it gets the
+    diagnosis as a claim plus the raw before/after telemetry, and must say
+    whether the re-run actually supports the claim."""
+    if not lambda_key():
+        return None, None
+    model = lambda_pick_model()
+    if not model:
+        return None, {"error": "no models visible to this Lambda key"}
+    system = ("You are a second-opinion reviewer for robot incident reports. You are given a "
+              "diagnosis another model produced and the telemetry from the failed run and the "
+              "re-run after its fix was applied. Judge whether the re-run supports the diagnosis. "
+              "Answer with a single JSON object and nothing else.")
+    user = f"""## Claimed diagnosis
+{json.dumps({k: report.get(k) for k in ('root_cause', 'evidence', 'fix')}, indent=2)}
+
+## Failed run: final state and downsampled telemetry
+{json.dumps(before)}
+{json.dumps(log_before[-12:])}
+
+## Re-run with the fix: final state and downsampled telemetry
+{json.dumps(after)}
+{json.dumps(log_after[-12:])}
+
+## Respond with exactly this JSON shape
+{{"verdict": "confirmed|rejected|inconclusive", "confidence": <0.0-1.0>,
+  "reasoning": "two sentences citing metrics", "residual_risk": "one sentence"}}"""
+    t0 = time.time()
+    try:
+        r = requests.post(f"{LAMBDA_URL}/chat/completions", timeout=90,
+                          headers={"Authorization": f"Bearer {lambda_key()}", "Content-Type": "application/json"},
+                          json={"model": model, "max_tokens": 400, "temperature": 0.1,
+                                "messages": [{"role": "system", "content": system},
+                                             {"role": "user", "content": user}]})
+        data = r.json()
+        if "choices" not in data:
+            return None, {"model": model, "error": str(data.get("error", data))[:200]}
+        usage = data.get("usage", {})
+        meta = {"model": model, "latency_s": round(time.time() - t0, 2),
+                "prompt_tokens": usage.get("prompt_tokens"), "completion_tokens": usage.get("completion_tokens")}
+        return parse_json(data["choices"][0]["message"]["content"]), meta
+    except (requests.RequestException, ValueError) as e:
+        return None, {"model": model, "error": str(e)[:200]}
+
+
 # ----------------------------------------------------------------- nango ---
 
 def file_issue(repo: str, title: str, body: str, out_dir: pathlib.Path) -> str:
@@ -238,8 +321,15 @@ def file_issue(repo: str, title: str, body: str, out_dir: pathlib.Path) -> str:
     return r.json().get("html_url", "filed")
 
 
-def issue_body(report: dict, before: dict, after: dict, meta: dict, config: dict) -> str:
+def issue_body(report: dict, before: dict, after: dict, meta: dict, config: dict,
+               review: dict | None = None, review_meta: dict | None = None) -> str:
     fix = report["fix"]
+    review_md = ""
+    if review and review_meta and "error" not in review_meta:
+        review_md = (f"\n**Independent review** (`{review_meta['model']}` on Lambda Inference, "
+                     f"{review_meta['latency_s']} s): **{review.get('verdict', '?').upper()}** "
+                     f"at confidence {review.get('confidence', '?')}. {review.get('reasoning', '')} "
+                     f"Residual risk: {review.get('residual_risk', '')}\n")
     rows = [
         "| | before | after fix |", "|---|---:|---:|",
         f"| balance_assist_scale | {before['balance_assist_scale']} | {after['balance_assist_scale']} |",
@@ -257,7 +347,7 @@ def issue_body(report: dict, before: dict, after: dict, meta: dict, config: dict
 **Fix applied:** `{fix['tunable']} = {fix['value']}` (was {config['balance_assist_scale']})
 
 {chr(10).join(rows)}
-
+{review_md}
 _Diagnosed by `{meta['model']}` via Respan in {meta['latency_s']} s ({meta['prompt_tokens']} in / {meta['completion_tokens']} out). Seed {before['seed']}, impulse {config['slip_impulse_n']} N._
 """
 
@@ -288,7 +378,7 @@ def main() -> None:
                                  balance_assist_scale=a.assist)
 
     # 1. run with the bad config
-    print(f"\n[1/4] Running episode  seed={a.seed}  balance_assist_scale={a.assist}", flush=True)
+    print(f"\n[1/5] Running episode  seed={a.seed}  balance_assist_scale={a.assist}", flush=True)
     t0 = time.time()
     before, log = rollout_with_log(env, policy, a.seed)
     (out_dir / "run_before.jsonl").write_text("\n".join(json.dumps(r) for r in log) + "\n")
@@ -299,7 +389,7 @@ def main() -> None:
         return
 
     # 2. diagnose through Respan
-    print(f"\n[2/4] Diagnosing with {a.llm} via Respan gateway", flush=True)
+    print(f"\n[2/5] Diagnosing with {a.llm} via Respan gateway", flush=True)
     report, meta = ask_gemma(build_prompt(config, before, log), a.llm)
     (out_dir / "report.json").write_text(json.dumps({"report": report, "gateway": meta}, indent=2) + "\n")
     print(f"      root cause : {report['root_cause']}")
@@ -322,21 +412,37 @@ def main() -> None:
         import sim_bridge
         sim_bridge.send("assist", scale=value)
         print(f"      sent assist={value} to the live viewer", flush=True)
-    print(f"\n[3/4] Re-running seed={a.seed} with {fix['tunable']}={value}", flush=True)
+    print(f"\n[3/5] Re-running seed={a.seed} with {fix['tunable']}={value}", flush=True)
     t0 = time.time()
     after, log_after = rollout_with_log(env, policy, a.seed)
     (out_dir / "run_after.jsonl").write_text("\n".join(json.dumps(r) for r in log_after) + "\n")
     print(f"      {outcome(after)}  ascent {after['ascent_m']} m  "
           f"upright {after['upright_score']}  ({time.time() - t0:.1f} s)", flush=True)
 
-    # 4. file it
-    print(f"\n[4/4] Filing issue on {a.repo} via Nango", flush=True)
-    body = issue_body(report, before, after, meta, config)
+    # 4. independent review on Lambda Inference
+    print("\n[4/5] Independent review on Lambda Inference", flush=True)
+    review, review_meta = review_on_lambda(report, before, after, log, log_after)
+    if review and review_meta and "error" not in review_meta:
+        print(f"      {review_meta['model']}  {review_meta['latency_s']} s")
+        print(f"      verdict    : {str(review.get('verdict', '?')).upper()}  "
+              f"(confidence {review.get('confidence', '?')})")
+        for line in textwrap.wrap(str(review.get("reasoning", "")), 70):
+            print(f"                   {line}")
+    elif review_meta:
+        print(f"      skipped: {review_meta.get('error')}", flush=True)
+    else:
+        print("      skipped (set LAMBDA_HOST in .env.local and run ./lambda_reviewer.sh tunnel)", flush=True)
+    (out_dir / "review.json").write_text(json.dumps({"review": review, "lambda": review_meta}, indent=2) + "\n")
+
+    # 5. file it
+    print(f"\n[5/5] Filing issue on {a.repo} via Nango", flush=True)
+    body = issue_body(report, before, after, meta, config, review, review_meta)
     where = file_issue(a.repo, report.get("issue_title", "G1 incident"), body, out_dir)
     print(f"      {where}", flush=True)
 
     summary = {"config": config, "before": before, "after": after, "report": report,
-               "gateway": meta, "issue": where, "fixed": bool(after["success"])}
+               "gateway": meta, "review": review, "lambda": review_meta,
+               "issue": where, "fixed": bool(after["success"])}
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
     print("\n" + "=" * 64)

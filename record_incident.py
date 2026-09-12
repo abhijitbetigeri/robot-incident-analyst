@@ -44,7 +44,17 @@ def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default()
 
 
-F_TITLE, F_HEAD, F_BODY, F_SMALL = font(26, True), font(21, True), font(19), font(16)
+F_TITLE, F_HEAD, F_BODY, F_SMALL = font(23, True), font(21, True), font(19), font(16)
+TITLE = "ROBOTIC SIMULATION INCIDENT ANALYSIS"
+ARCH_CARD = pathlib.Path(__file__).with_name("submission") / "architecture.png"
+
+
+def intro_frames(writer, seconds: float = 6.0) -> None:
+    """Open with the architecture card so the viewer knows the shape of the loop."""
+    if not ARCH_CARD.exists():
+        return
+    img = Image.open(ARCH_CARD).convert("RGB").resize((W_ROBOT + W_PANEL, H))
+    hold(writer, np.asarray(img), seconds)
 
 
 def panel(lines: list[tuple[str, tuple[int, int, int], ImageFont.FreeTypeFont]]) -> np.ndarray:
@@ -70,7 +80,7 @@ def compose(robot: np.ndarray, right: np.ndarray) -> np.ndarray:
 
 
 def live_lines(stage: str, cfg_scale: float, seed: int, row: dict | None, status: tuple[str, tuple] | None):
-    lines = [("ROBOT INCIDENT ANALYST", INK, F_TITLE), ("", INK, F_BODY),
+    lines = [(TITLE, INK, F_TITLE), ("", INK, F_BODY),
              (stage, TEAL, F_HEAD),
              (f"seed={seed}  balance_assist_scale={cfg_scale}", MUTED, F_SMALL), ("", INK, F_BODY)]
     if row:
@@ -157,22 +167,25 @@ def main() -> None:
     writer = imageio.get_writer(str(out), fps=FPS, codec="libx264", quality=8, macro_block_size=16)
     t0 = time.time()
 
+    # 0. architecture card
+    intro_frames(writer, 6.0)
+
     # 1. fail
     print("[1/4] rendering the failing run", flush=True)
     before, log, fall_frame = rollout_render(env, policy, a.seed, writer,
-                                             "[1/4] Running episode", a.assist, every=1)
+                                             "[1/5] Running episode", a.assist, every=1)
     print(f"      {il.outcome(before)}", flush=True)
 
     # 2. diagnose
     print(f"[2/4] diagnosing via Respan / {a.llm}", flush=True)
-    thinking = compose(fall_frame, panel(live_lines("[2/4] Diagnosing", a.assist, a.seed, None,
+    thinking = compose(fall_frame, panel(live_lines("[2/5] Diagnosing", a.assist, a.seed, None,
                                                     (f"sending {len(log)} telemetry rows to", MUTED))
                                          + [(f"{a.llm}", TEAL, F_BODY), ("via Respan gateway ...", MUTED, F_BODY)]))
     hold(writer, thinking, 2.0)
     report, meta = il.ask_gemma(il.build_prompt(config, before, log), a.llm)
     fix = report["fix"]
-    lines = [("ROBOT INCIDENT ANALYST", INK, F_TITLE), ("", INK, F_BODY),
-             ("[2/4] Diagnosis", TEAL, F_HEAD),
+    lines = [(TITLE, INK, F_TITLE), ("", INK, F_BODY),
+             ("[2/5] Diagnosis", TEAL, F_HEAD),
              (f"{meta['model']}", MUTED, F_SMALL),
              (f"{meta['latency_s']} s   {meta['prompt_tokens']} in / {meta['completion_tokens']} out", MUTED, F_SMALL),
              ("", INK, F_BODY), ("ROOT CAUSE", AMBER, F_SMALL)]
@@ -194,18 +207,45 @@ def main() -> None:
         env._slip_impulse = value
     print("[3/4] rendering the re-run", flush=True)
     after, _log2, ok_frame = rollout_render(env, policy, a.seed, writer,
-                                            f"[3/4] Re-running with fix", value, every=2, hold=40)
+                                            f"[3/5] Re-running with fix", value, every=2, hold=40)
     print(f"      {il.outcome(after)}", flush=True)
 
-    # 4. file
+    # 4. independent review on the Lambda instance
+    print("[4/5] independent review on Lambda", flush=True)
+    waiting = compose(ok_frame, panel(live_lines("[4/5] Independent review", value, a.seed, None,
+                                                 ("sending before + after telemetry to", MUTED))
+                                      + [("reviewer model on Lambda GPU ...", TEAL, F_BODY)]))
+    hold(writer, waiting, 1.5)
+    review, review_meta = il.review_on_lambda(report, before, after, log, _log2)
+    lines = [(TITLE, INK, F_TITLE), ("", INK, F_BODY),
+             ("[4/5] Independent review on Lambda", TEAL, F_HEAD)]
+    if review and review_meta and "error" not in review_meta:
+        verdict = str(review.get("verdict", "?")).upper()
+        vcol = GREEN if verdict == "CONFIRMED" else AMBER
+        lines += [(f"{review_meta['model']}  on Lambda GPU instance", MUTED, F_SMALL),
+                  (f"{review_meta['latency_s']} s", MUTED, F_SMALL), ("", INK, F_BODY),
+                  ("VERDICT", AMBER, F_SMALL),
+                  (f"{verdict}   confidence {review.get('confidence', '?')}", vcol, F_HEAD), ("", INK, F_BODY),
+                  ("REASONING", AMBER, F_SMALL)]
+        lines += [(l, INK, F_SMALL) for l in wrap(str(review.get("reasoning", "")), 46)]
+        lines += [("", INK, F_BODY), ("RESIDUAL RISK", AMBER, F_SMALL)]
+        lines += [(l, INK, F_SMALL) for l in wrap(str(review.get("residual_risk", "")), 46)]
+        print(f"      {verdict} ({review_meta['model']}, {review_meta['latency_s']} s)", flush=True)
+    else:
+        lines += [("review unavailable", MUTED, F_BODY)]
+        lines += [(l, MUTED, F_SMALL) for l in wrap(str((review_meta or {}).get("error", "LAMBDA not configured")), 46)]
+        print(f"      skipped: {(review_meta or {}).get('error', 'not configured')}", flush=True)
+    hold(writer, compose(ok_frame, panel(lines)), 7.0)
+
+    # 5. file
     where = "not filed (--no-issue)"
     if not a.no_issue:
-        print("[4/4] filing issue via Nango", flush=True)
+        print("[5/5] filing issue via Nango", flush=True)
         where = il.file_issue(a.repo, report.get("issue_title", "Robot incident"),
-                              il.issue_body(report, before, after, meta, config), art)
+                              il.issue_body(report, before, after, meta, config, review, review_meta), art)
         print(f"      {where}", flush=True)
-    lines = [("ROBOT INCIDENT ANALYST", INK, F_TITLE), ("", INK, F_BODY),
-             ("[4/4] Issue filed via Nango", TEAL, F_HEAD)]
+    lines = [(TITLE, INK, F_TITLE), ("", INK, F_BODY),
+             ("[5/5] Issue filed via Nango", TEAL, F_HEAD)]
     lines += [(l, MUTED, F_SMALL) for l in wrap(where, 48)]
     lines += [("", INK, F_BODY),
               (f"{'':16}{'before':>10}{'after':>10}", MUTED, F_SMALL),
@@ -216,7 +256,7 @@ def main() -> None:
               ("", INK, F_BODY),
               ("Respan gateway  ->  Gemma 4 31B", MUTED, F_SMALL),
               ("Nango           ->  GitHub issue", MUTED, F_SMALL),
-              ("Lambda          ->  student fine-tune (next)", MUTED, F_SMALL)]
+              ("Lambda          ->  independent review", MUTED, F_SMALL)]
     hold(writer, compose(ok_frame, panel(lines)), 6.0)
     writer.close()
     env.close()

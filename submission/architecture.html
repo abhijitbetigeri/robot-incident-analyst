@@ -1,0 +1,125 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 1920px; height: 720px; background: #141C26; overflow: hidden; }
+  body { font-family: Menlo, "IBM Plex Mono", monospace; color: #F2F5F8; }
+  .title { position: absolute; left: 60px; top: 34px; font-size: 34px; font-weight: bold; letter-spacing: 0.5px; }
+  .sub { position: absolute; left: 60px; top: 84px; font-size: 18px; color: #9FB0C0; }
+  .legend { position: absolute; right: 60px; top: 40px; font-size: 16px; color: #9FB0C0; display: flex; gap: 26px; }
+  .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; border: 1.5px solid; }
+  .l-lambda::before { border-color: #E89A4A; background: rgba(232,154,74,.25); }
+  .l-respan::before { border-color: #3FB3B0; background: rgba(63,179,176,.25); }
+  .l-nango::before  { border-color: #9A8CF0; background: rgba(154,140,240,.25); }
+  .l-gemma::before  { border-color: #6E9CF0; background: rgba(110,156,240,.25); }
+  .l-none::before   { border-color: rgba(242,245,248,.55); background: #1A2129; }
+  svg { position: absolute; left: 60px; top: 128px; width: 1800px; height: 570px; color: #F2F5F8; font-family: Menlo, monospace; }
+  .box { stroke-width: 1.6; }
+  .f-lambda { fill: #E89A4A; fill-opacity: .18; stroke: #E89A4A; }
+  .f-respan { fill: #3FB3B0; fill-opacity: .18; stroke: #3FB3B0; }
+  .f-nango  { fill: #9A8CF0; fill-opacity: .18; stroke: #9A8CF0; }
+  .f-gemma  { fill: #6E9CF0; fill-opacity: .18; stroke: #6E9CF0; }
+  .f-none   { fill: #1A2129; stroke: rgba(242,245,248,.55); }
+  .next     { stroke-dasharray: 5 4; }
+  .t1 { font-size: 13px; font-weight: bold; fill: currentColor; }
+  .t2 { font-size: 10.5px; fill: currentColor; fill-opacity: .72; }
+  .lbl { font-size: 10px; fill: currentColor; fill-opacity: .8; }
+  .tag { font-size: 10px; font-weight: bold; fill: #E89A4A; }
+  .edge { fill: none; stroke: currentColor; stroke-width: 1.4; }
+  .dash { stroke-dasharray: 5 4; }
+  .badge { fill: #F2F5F8; } .badge-t { font-size: 10px; font-weight: bold; fill: #141C26; }
+</style></head><body>
+<div class="title">ROBOTIC SIMULATION INCIDENT ANALYSIS</div>
+<div class="sub">A failed robot run gets a root cause, a fix, a verified re-run, and a ticket. No human reads the log.</div>
+<div class="legend"><span class="l-lambda">Lambda</span><span class="l-nango">Nango</span><span class="l-respan">Respan</span><span class="l-gemma">Gemma</span><span class="l-none">this repo</span></div>
+
+<svg viewBox="0 0 1160 368" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+
+  <!-- row 1: run loop -->
+  <text class="lbl" x="210" y="14" text-anchor="middle">run log</text>
+  <text class="lbl" x="400" y="14" text-anchor="middle">prompt</text>
+  <text class="lbl" x="590" y="14" text-anchor="middle">JSON</text>
+  <text class="lbl" x="780" y="14" text-anchor="middle">tool call</text>
+  <text class="lbl" x="970" y="14" text-anchor="middle">API</text>
+
+  <rect class="box f-none" x="40" y="22" width="150" height="72" rx="3"/>
+  <circle class="badge" cx="55" cy="38" r="8"/><text class="badge-t" x="55" y="41.5" text-anchor="middle">1</text>
+  <text class="t1" x="70" y="42">Robot run</text>
+  <text class="t2" x="55" y="62">Unitree G1 · MuJoCo</text>
+  <text class="t2" x="55" y="78">falls at step 126</text>
+  <path class="edge" d="M192 58 H228" marker-end="url(#a)"/>
+
+  <rect class="box f-respan" x="230" y="22" width="150" height="72" rx="3"/>
+  <circle class="badge" cx="245" cy="38" r="8"/><text class="badge-t" x="245" y="41.5" text-anchor="middle">2</text>
+  <text class="t1" x="260" y="42">Respan gateway</text>
+  <text class="t2" x="245" y="62">one endpoint</text>
+  <text class="t2" x="245" y="78">routes · logs · cost</text>
+  <path class="edge" d="M382 58 H418" marker-end="url(#a)"/>
+
+  <rect class="box f-gemma" x="420" y="22" width="150" height="72" rx="3"/>
+  <circle class="badge" cx="435" cy="38" r="8"/><text class="badge-t" x="435" y="41.5" text-anchor="middle">3</text>
+  <text class="t1" x="450" y="42">Gemma 4 31B</text>
+  <text class="t2" x="435" y="62">reads the telemetry</text>
+  <text class="t2" x="435" y="78">root cause + fix</text>
+  <path class="edge" d="M572 58 H608" marker-end="url(#a)"/>
+
+  <rect class="box f-none" x="610" y="22" width="150" height="72" rx="3"/>
+  <circle class="badge" cx="625" cy="38" r="8"/><text class="badge-t" x="625" y="41.5" text-anchor="middle">4</text>
+  <text class="t1" x="640" y="42">Fix + re-run</text>
+  <text class="t2" x="625" y="62">apply to live env</text>
+  <text class="t2" x="625" y="78">same seed → 1.53 m</text>
+  <path class="edge" d="M762 58 H798" marker-end="url(#a)"/>
+
+  <rect class="box f-nango" x="800" y="22" width="150" height="72" rx="3"/>
+  <circle class="badge" cx="815" cy="38" r="8"/><text class="badge-t" x="815" y="41.5" text-anchor="middle">6</text>
+  <text class="t1" x="830" y="42">Nango</text>
+  <text class="t2" x="815" y="62">GitHub tool, auth</text>
+  <text class="t2" x="815" y="78">handled</text>
+  <path class="edge" d="M952 58 H988" marker-end="url(#a)"/>
+
+  <rect class="box f-none" x="990" y="22" width="150" height="72" rx="3"/>
+  <circle class="badge" cx="1005" cy="38" r="8"/><text class="badge-t" x="1005" y="41.5" text-anchor="middle">7</text>
+  <text class="t1" x="1020" y="42">GitHub issue</text>
+  <text class="t2" x="1005" y="62">cause · evidence</text>
+  <text class="t2" x="1005" y="78">before/after · review</text>
+
+  <!-- closed loop: fix back to robot -->
+  <path class="edge" d="M685 94 V128 H115 V96" marker-end="url(#a)"/>
+  <text class="lbl" x="330" y="122">closed loop: the fix is applied and the episode is re-run to prove it</text>
+
+  <!-- row 2: lambda reviewer -->
+  <rect class="box f-lambda" x="760" y="170" width="230" height="72" rx="3"/>
+  <circle class="badge" cx="775" cy="186" r="8"/><text class="badge-t" x="775" y="189.5" text-anchor="middle">5</text>
+  <text class="t1" x="790" y="190">Independent review</text>
+  <text class="t2" x="775" y="210">Gemma 3 12B on a Lambda GPU</text>
+  <text class="t2" x="775" y="226">confirms or rejects the diagnosis</text>
+  <path class="edge" d="M740 94 V206 H758" marker-end="url(#a)"/>
+  <text class="lbl" x="748" y="150" text-anchor="end">before + after telemetry</text>
+  <path class="edge" d="M900 168 V96" marker-end="url(#a)"/>
+  <text class="lbl" x="908" y="140">verdict into</text>
+  <text class="lbl" x="908" y="153">the issue</text>
+
+  <!-- respan logs every call -->
+  <path class="edge dash" d="M305 94 V206 H352" marker-end="url(#a)"/>
+  <rect class="box f-respan" x="355" y="170" width="190" height="72" rx="3"/>
+  <text class="t1" x="370" y="190">Respan traces + evals</text>
+  <text class="t2" x="370" y="210">every diagnosis kept:</text>
+  <text class="t2" x="370" y="226">prompt · output · cost · latency</text>
+
+  <!-- row 3: next, dashed -->
+  <text class="tag" x="40" y="292">NEXT</text>
+  <path class="edge dash" d="M450 242 V300 H478" marker-end="url(#a)"/>
+  <rect class="box f-lambda next" x="480" y="268" width="200" height="64" rx="3"/>
+  <text class="t1" x="495" y="288">LoRA fine-tune on Lambda</text>
+  <text class="t2" x="495" y="306">Gemma 4 E4B student learns</text>
+  <text class="t2" x="495" y="320">the task from the traces</text>
+  <path class="edge dash" d="M682 300 H718" marker-end="url(#a)"/>
+  <rect class="box f-respan next" x="720" y="268" width="200" height="64" rx="3"/>
+  <text class="t1" x="735" y="288">Promote via Respan</text>
+  <text class="t2" x="735" y="306">evals gate the swap: student</text>
+  <text class="t2" x="735" y="320">replaces 31B when it matches</text>
+  <path class="edge dash" d="M820 266 V244" marker-end="url(#a)"/>
+  <text class="lbl" x="80" y="310">Dashed boxes are the planned</text>
+  <text class="lbl" x="80" y="324">distillation step, not in the demo.</text>
+</svg>
+</body></html>
