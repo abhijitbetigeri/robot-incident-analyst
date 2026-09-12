@@ -8,8 +8,9 @@ G1 humanoid climbing a fixed line on a 35-degree slope in MuJoCo, driven by a
 trained PPO policy. The environment, the policy checkpoint, and the analyst are
 all in this repo.
 
+- Demo video (39 s): [submission/demo.mp4](submission/demo.mp4)
 - Slide: [submission/g1-incident-analyst.pptx](submission/g1-incident-analyst.pptx)
-- Script: [incident_loop.py](incident_loop.py)
+- Script: [incident_loop.py](incident_loop.py), recorder: [record_incident.py](record_incident.py)
 - Example ticket the agent filed: [issue #1](https://github.com/abhijitbetigeri/robot-incident-analyst/issues/1)
 
 ## The loop
