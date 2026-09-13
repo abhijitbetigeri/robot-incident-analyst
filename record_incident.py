@@ -229,6 +229,8 @@ def run_scenario(writer, policy, a, name, idx, total, art):
             print(f"      {verdict} ({review_meta['model']}, {review_meta['latency_s']} s)", flush=True)
         else:
             print(f"      skipped: {(review_meta or {}).get('error', 'not configured')}", flush=True)
+    else:
+        print(f"[{name}] 4/5 review skipped: reviewer not reachable", flush=True)
 
     # 5. file
     where = "not filed (--no-issue)"

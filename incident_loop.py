@@ -294,15 +294,44 @@ def lambda_key() -> str:
     return os.environ.get("LAMBDA_API_KEY", "") or os.environ.get("LAMBDA_ENABLED", "")
 
 
+def ensure_tunnel() -> bool:
+    """(Re)open the SSH tunnel to the Lambda instance if the reviewer is unreachable.
+
+    The tunnel is a background ssh process; it dies when the laptop sleeps or
+    the network changes, which is exactly when a long render is running."""
+    host = os.environ.get("LAMBDA_HOST", "")
+    if not host or host.startswith("PASTE_") or "127.0.0.1" not in LAMBDA_URL:
+        return False
+    key = os.path.expanduser(os.environ.get("LAMBDA_SSH_KEY", "~/.ssh/lambda.pem"))
+    port = LAMBDA_URL.split(":")[-1].split("/")[0]
+    import subprocess
+    subprocess.run(["pkill", "-f", f"L {port}:127.0.0.1:{port}"], capture_output=True)
+    r = subprocess.run(["ssh", "-i", key, "-o", "StrictHostKeyChecking=accept-new",
+                        "-o", "ServerAliveInterval=30", "-o", "ExitOnForwardFailure=yes",
+                        "-o", "ConnectTimeout=15", "-f", "-N",
+                        "-L", f"{port}:127.0.0.1:{port}", f"ubuntu@{host}"], capture_output=True)
+    time.sleep(1.5)
+    return r.returncode == 0
+
+
+def _list_lambda_models() -> list[str]:
+    r = requests.get(f"{LAMBDA_URL}/models", headers={"Authorization": f"Bearer {lambda_key()}"}, timeout=20)
+    return [m["id"] for m in r.json().get("data", [])]
+
+
 def lambda_pick_model() -> str | None:
     forced = os.environ.get("LAMBDA_MODEL")
     if forced:
         return forced
     try:
-        r = requests.get(f"{LAMBDA_URL}/models", headers={"Authorization": f"Bearer {lambda_key()}"}, timeout=20)
-        ids = [m["id"] for m in r.json().get("data", [])]
+        ids = _list_lambda_models()
     except (requests.RequestException, ValueError, KeyError):
-        return None
+        if not ensure_tunnel():
+            return None
+        try:
+            ids = _list_lambda_models()
+        except (requests.RequestException, ValueError, KeyError):
+            return None
     for pref in LAMBDA_PREFERRED:
         for i in ids:
             if pref in i.lower():
