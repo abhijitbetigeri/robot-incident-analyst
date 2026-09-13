@@ -82,7 +82,7 @@ def compose(robot: np.ndarray, right: np.ndarray) -> np.ndarray:
 def live_lines(stage: str, cfg_scale: float, seed: int, row: dict | None, status: tuple[str, tuple] | None):
     lines = [(TITLE, INK, F_TITLE), ("", INK, F_BODY),
              (stage, TEAL, F_HEAD),
-             (f"seed={seed}  balance_assist_scale={cfg_scale}", MUTED, F_SMALL), ("", INK, F_BODY)]
+             (f"seed={seed}  {cfg_scale}", MUTED, F_SMALL), ("", INK, F_BODY)]
     if row:
         lines += [
             (f"step            {row['step']:>6d}", INK, F_BODY),
