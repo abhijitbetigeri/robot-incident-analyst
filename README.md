@@ -58,7 +58,14 @@ verified: the re-run with the proposed fix completes the ascent.
 
 An independent reviewer model served on a Lambda GPU (see
 `lambda_reviewer.sh`) checks each diagnosis against the before and after
-telemetry and adds its verdict to the issue.
+telemetry and adds its verdict to the issue. Example with the review:
+[issue #10](https://github.com/abhijitbetigeri/robot-incident-analyst/issues/10),
+where Gemma 3 12B on a GH200 confirmed the traction diagnosis at 0.95 confidence.
+
+```bash
+./lambda_reviewer.sh setup    # install Ollama on the instance, pull gemma3:12b
+./lambda_reviewer.sh tunnel   # forward localhost:11434 to it, keep open
+```
 
 ## Run it
 
@@ -98,7 +105,7 @@ robot recover. `record_incident.py` renders all scenarios into
 |---|---|
 | Respan | Gateway for every model call. Traces of each diagnosis are the training set; evals gate the student model. |
 | Gemma | Gemma 4 31B is the analyst today. Gemma 4 E4B is the student to distill into. |
-| Lambda | Fine-tune the E4B student on the Respan traces and serve it with vLLM. Next step. |
+| Lambda | Serves the independent reviewer (Gemma 3 12B via Ollama on a GH200) that verifies every diagnosis before it is filed. Next: fine-tune the E4B student on the Respan traces there. |
 | Nango | GitHub and Slack tools with auth handled. The agent files the ticket. |
 
 ## Why this matters

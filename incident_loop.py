@@ -482,7 +482,7 @@ def main() -> None:
           f"upright {after['upright_score']}  ({time.time() - t0:.1f} s)", flush=True)
 
     # 4. independent review on Lambda Inference
-    print("\n[4/5] Independent review on Lambda Inference", flush=True)
+    print("\n[4/5] Independent review on Lambda GPU", flush=True)
     review, review_meta = review_on_lambda(report, before, after, log, log_after)
     if review and review_meta and "error" not in review_meta:
         print(f"      {review_meta['model']}  {review_meta['latency_s']} s")
